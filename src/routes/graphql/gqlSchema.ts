@@ -1,103 +1,102 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
-  GraphQLEnumType,
-  GraphQLInputObjectType,
-  GraphQLList,
-  GraphQLNonNull,
   GraphQLObjectType,
-  GraphQLSchema,
   GraphQLString,
-  GraphQLFloat,
+  GraphQLNonNull,
   GraphQLBoolean,
-  GraphQLID,
   GraphQLInt,
-  GraphQLInterfaceType,
+  GraphQLEnumType,
+  GraphQLFloat,
+  GraphQLList,
+  GraphQLInputObjectType,
+  GraphQLSchema,
 } from 'graphql';
-import { PrismaClient } from '@prisma/client';
+import { parse, ResolveTree, simplify } from 'graphql-parse-resolve-info';
+import { MemberTypeId } from '../member-types/schemas.js';
 import { UUIDType } from './types/uuid.js';
 
-const prisma = new PrismaClient();
-
-const MemberTypeId = new GraphQLEnumType({
+const MemberTypeIdEnum = new GraphQLEnumType({
   name: 'MemberTypeId',
   values: {
-    BASIC: { value: 'BASIC' },
-    BUSINESS: { value: 'BUSINESS' },
+    BASIC: { value: MemberTypeId.BASIC },
+    BUSINESS: { value: MemberTypeId.BUSINESS },
   },
 });
 
 const MemberType = new GraphQLObjectType({
-  name: 'MemberType',
-  fields: {
-    id: { type: new GraphQLNonNull(MemberTypeId) },
+  name: 'Member',
+  fields: () => ({
+    id: { type: new GraphQLNonNull(MemberTypeIdEnum) },
     discount: { type: new GraphQLNonNull(GraphQLFloat) },
     postsLimitPerMonth: { type: new GraphQLNonNull(GraphQLInt) },
-  },
+  }),
 });
 
-const Post = new GraphQLObjectType({
+const PostType = new GraphQLObjectType({
   name: 'Post',
-  fields: {
+  fields: () => ({
     id: { type: new GraphQLNonNull(UUIDType) },
     title: { type: new GraphQLNonNull(GraphQLString) },
     content: { type: new GraphQLNonNull(GraphQLString) },
-  },
+  }),
 });
-const Profile = new GraphQLObjectType({
+
+const ProfileType = new GraphQLObjectType({
   name: 'Profile',
-  fields: {
+  fields: () => ({
     id: { type: new GraphQLNonNull(UUIDType) },
     isMale: { type: new GraphQLNonNull(GraphQLBoolean) },
     yearOfBirth: { type: new GraphQLNonNull(GraphQLInt) },
-    memberType: { type: new GraphQLNonNull(MemberType) },
-  },
-});
-// const User: GraphQLObjectType = new GraphQLObjectType({
-//   name: 'User',
-//   fields: () => ({
-//     id: { type: new GraphQLNonNull(UUIDType) },
-//     name: { type: new GraphQLNonNull(GraphQLString) },
-//     balance: { type: new GraphQLNonNull(GraphQLFloat) },
-//     profile: { type: Profile },
-//     posts: { type: new GraphQLNonNull(new GraphQLList(Post)) },
-//     userSubscribedTo: { type: new GraphQLNonNull(new GraphQLList(User)) },
-//     subscribedToUser: { type: new GraphQLNonNull(new GraphQLList(User)) },
-//   }),
-// });
-
-const UserInterface = new GraphQLInterfaceType({
-  name: 'UserInterface',
-  fields: {
-    id: { type: new GraphQLNonNull(UUIDType) },
-    name: { type: new GraphQLNonNull(GraphQLString) },
-    balance: { type: new GraphQLNonNull(GraphQLFloat) },
-  },
-  resolveType: (value) => {
-    if ('profile' in value || 'posts' in value) {
-      return 'User';
-    }
-    return undefined;
-  },
+    memberType: {
+      type: new GraphQLNonNull(MemberType),
+      async resolve({ memberTypeId }, args, { memberTypeLoader }) {
+        return memberTypeLoader.load(memberTypeId);
+      },
+    },
+  }),
 });
 
-const User = new GraphQLObjectType({
+const UserType = new GraphQLObjectType({
   name: 'User',
-  interfaces: [UserInterface],
   fields: () => ({
     id: { type: new GraphQLNonNull(UUIDType) },
     name: { type: new GraphQLNonNull(GraphQLString) },
     balance: { type: new GraphQLNonNull(GraphQLFloat) },
-    profile: { type: Profile },
-    posts: { type: new GraphQLNonNull(new GraphQLList(Post)) },
-    userSubscribedTo: { type: new GraphQLNonNull(new GraphQLList(User)) },
-    subscribedToUser: { type: new GraphQLNonNull(new GraphQLList(User)) },
+    profile: {
+      type: ProfileType,
+      resolve: async ({ id }, args, { profileByUserIdLoader }) => {
+        return profileByUserIdLoader.load(id);
+      },
+    },
+    posts: {
+      type: new GraphQLNonNull(new GraphQLList(PostType)),
+      resolve: async ({ id }, args, { postsByAuthorLoader }) => {
+        return postsByAuthorLoader.load(id);
+      },
+    },
+    userSubscribedTo: {
+      type: new GraphQLNonNull(new GraphQLList(UserType)),
+      resolve: async ({ userSubscribedTo }, args, { userLoader }) => {
+        return userSubscribedTo.map((subscribtion) =>
+          userLoader.load(subscribtion.authorId),
+        );
+      },
+    },
+    subscribedToUser: {
+      type: new GraphQLNonNull(new GraphQLList(UserType)),
+      resolve: async ({ subscribedToUser }, args, { userLoader }) => {
+        return subscribedToUser.map((subscribtion) =>
+          userLoader.load(subscribtion.subscriberId),
+        );
+      },
+    },
   }),
 });
 
-export { UserInterface, User };
-
-const ChangePostInput = new GraphQLInputObjectType({
+const ChangePostInputType = new GraphQLInputObjectType({
   name: 'ChangePostInput',
   fields: {
     title: { type: GraphQLString },
@@ -105,16 +104,16 @@ const ChangePostInput = new GraphQLInputObjectType({
   },
 });
 
-const ChangeProfileInput = new GraphQLInputObjectType({
+const ChangeProfileInputType = new GraphQLInputObjectType({
   name: 'ChangeProfileInput',
   fields: {
     isMale: { type: GraphQLBoolean },
     yearOfBirth: { type: GraphQLInt },
-    memberTypeId: { type: MemberTypeId },
+    memberTypeId: { type: MemberTypeIdEnum },
   },
 });
 
-const ChangeUserInput = new GraphQLInputObjectType({
+const ChangeUserInputType = new GraphQLInputObjectType({
   name: 'ChangeUserInput',
   fields: {
     name: { type: GraphQLString },
@@ -122,7 +121,7 @@ const ChangeUserInput = new GraphQLInputObjectType({
   },
 });
 
-const CreatePostInput = new GraphQLInputObjectType({
+const CreatePostInputType = new GraphQLInputObjectType({
   name: 'CreatePostInput',
   fields: {
     title: { type: new GraphQLNonNull(GraphQLString) },
@@ -131,17 +130,17 @@ const CreatePostInput = new GraphQLInputObjectType({
   },
 });
 
-const CreateProfileInput = new GraphQLInputObjectType({
+const CreateProfileInputType = new GraphQLInputObjectType({
   name: 'CreateProfileInput',
   fields: {
     isMale: { type: new GraphQLNonNull(GraphQLBoolean) },
     yearOfBirth: { type: new GraphQLNonNull(GraphQLInt) },
     userId: { type: new GraphQLNonNull(UUIDType) },
-    memberTypeId: { type: new GraphQLNonNull(MemberTypeId) },
+    memberTypeId: { type: new GraphQLNonNull(MemberTypeIdEnum) },
   },
 });
 
-const CreateUserInput = new GraphQLInputObjectType({
+const CreateUserInputType = new GraphQLInputObjectType({
   name: 'CreateUserInput',
   fields: {
     name: { type: new GraphQLNonNull(GraphQLString) },
@@ -149,297 +148,271 @@ const CreateUserInput = new GraphQLInputObjectType({
   },
 });
 
-const RootQueryType = new GraphQLObjectType({
-  name: 'RootQueryType',
-  fields: {
-    memberTypes: {
-      type: new GraphQLNonNull(new GraphQLList(MemberType)),
-      resolve: async () => {
-        return await prisma.memberType.findMany(); // Предполагается, что в базе данных есть таблица `memberType`
-      },
-    },
-    memberType: {
-      type: MemberType,
-      args: { id: { type: new GraphQLNonNull(MemberTypeId) } },
-      resolve: async (_, { id }) => {
-        const memberType = await prisma.memberType.findUnique({ where: { id } });
-        if (!memberType) throw new Error('MemberType not found');
-        return memberType;
-      },
-    },
-    users: {
-      type: new GraphQLNonNull(new GraphQLList(User)),
-      resolve: async () => {
-        return await prisma.user.findMany();
-      },
-    },
-    user: {
-      type: User,
-      args: { id: { type: new GraphQLNonNull(UUIDType) } },
-      resolve: async (_, { id }) => {
-        return await prisma.user.findUnique({ where: { id } });
-      },
-    },
-    posts: {
-      type: new GraphQLNonNull(new GraphQLList(Post)),
-      resolve: async () => {
-        return await prisma.post.findMany();
-      },
-    },
-    post: {
-      type: Post,
-      args: { id: { type: new GraphQLNonNull(UUIDType) } },
-      resolve: async (_, { id }) => {
-        return await prisma.post.findUnique({ where: { id } });
-      },
-    },
-    profiles: {
-      type: new GraphQLNonNull(new GraphQLList(Profile)),
-      resolve: async () => {
-        return await prisma.profile.findMany();
-      },
-    },
-    profile: {
-      type: Profile,
-      args: { id: { type: new GraphQLNonNull(UUIDType) } },
-      resolve: async (_, { id }) => {
-        return await prisma.profile.findUnique({ where: { id } });
-      },
-    },
-  },
-});
-
-interface CreateUserDto {
-  name: string;
-  balance: number;
-}
-
 const Mutations = new GraphQLObjectType({
   name: 'Mutations',
   fields: {
     createUser: {
-      type: User,
-      args: { dto: { type: new GraphQLNonNull(CreateUserInput) } },
-      resolve: async (_: unknown, { dto }: { dto: CreateUserDto }) => {
-        try {
-          const user = await prisma.user.create({
-            data: {
-              name: dto.name,
-              balance: dto.balance,
-            },
-          });
-          return user;
-        } catch (error) {
-          console.error('Error creating user:', error);
-          throw new Error('Failed to create user');
-        }
+      type: new GraphQLNonNull(UserType),
+      args: {
+        dto: { type: new GraphQLNonNull(CreateUserInputType) },
+      },
+      async resolve(_, { dto }, { prisma }) {
+        return prisma.user.create({
+          data: dto,
+        });
       },
     },
+
     createProfile: {
-      type: Profile,
-      args: { dto: { type: new GraphQLNonNull(CreateProfileInput) } },
-      resolve: async (_: unknown, { dto }) => {
-        try {
-          const profile = await prisma.profile.create({
-            data: {
-              isMale: dto.isMale,
-              yearOfBirth: dto.yearOfBirth,
-              user: dto.userId,
-              // user: {
-              //   connect: { id: dto.userId },
-              // },
-              memberType: dto.memberTypeId,
-              // memberType: {
-              //   connect: { id: dto.memberTypeId },
-              // },
-            },
-          });
-          return profile;
-        } catch (error) {
-          console.error('Error creating profile:', error);
-          throw new Error('Failed to create profile');
-        }
+      type: new GraphQLNonNull(ProfileType),
+      args: {
+        dto: { type: new GraphQLNonNull(CreateProfileInputType) },
+      },
+      async resolve(_, { dto }, { prisma }) {
+        return prisma.profile.create({
+          data: dto,
+        });
       },
     },
+
     createPost: {
-      type: Post,
-      args: { dto: { type: new GraphQLNonNull(CreatePostInput) } },
-      resolve: async (_, { dto }) => {
-        try {
-          const post = await prisma.post.create({
-            data: {
-              title: dto.title,
-              content: dto.content,
-              author: {
-                connect: { id: dto.authorId }, // Ensure author exists
-              },
-            },
-          });
-          return post;
-        } catch (error) {
-          console.error('Error creating post:', error);
-          throw new Error('Failed to create post');
-        }
+      type: new GraphQLNonNull(PostType),
+      args: {
+        dto: { type: new GraphQLNonNull(CreatePostInputType) },
+      },
+      async resolve(_, { dto }, { prisma }) {
+        return prisma.post.create({
+          data: dto,
+        });
       },
     },
+
     changePost: {
-      type: Post,
+      type: new GraphQLNonNull(PostType),
       args: {
         id: { type: new GraphQLNonNull(UUIDType) },
-        dto: { type: new GraphQLNonNull(ChangePostInput) },
+        dto: { type: new GraphQLNonNull(ChangePostInputType) },
       },
-      resolve: async (_, { id, dto }) => {
-        try {
-          const updatedPost = await prisma.post.update({
-            where: { id },
-            data: {
-              title: dto.title,
-              content: dto.content,
-            },
-          });
-          return updatedPost;
-        } catch (error) {
-          console.error('Error updating post:', error);
-          throw new Error('Failed to update post');
-        }
+      async resolve(_, { id, dto }, { prisma }) {
+        return prisma.post.update({
+          where: { id: id },
+          data: dto,
+        });
       },
     },
+
     changeProfile: {
-      type: Profile,
+      type: new GraphQLNonNull(ProfileType),
       args: {
         id: { type: new GraphQLNonNull(UUIDType) },
-        dto: { type: new GraphQLNonNull(ChangeProfileInput) },
+        dto: { type: new GraphQLNonNull(ChangeProfileInputType) },
       },
-      resolve: async (_, { id, dto }) => {
-        try {
-          const updatedProfile = await prisma.profile.update({
-            where: { id },
-            data: {
-              isMale: dto.isMale,
-              yearOfBirth: dto.yearOfBirth,
-              memberType: {
-                connect: { id: dto.memberTypeId },
-              },
-            },
-          });
-          return updatedProfile;
-        } catch (error) {
-          console.error('Error updating profile:', error);
-          throw new Error('Failed to update profile');
-        }
+      async resolve(_, { id, dto }, { prisma }) {
+        return prisma.profile.update({
+          where: { id: id },
+          data: dto,
+        });
       },
     },
+
     changeUser: {
-      type: User,
+      type: new GraphQLNonNull(UserType),
       args: {
         id: { type: new GraphQLNonNull(UUIDType) },
-        dto: { type: new GraphQLNonNull(ChangeUserInput) },
+        dto: { type: new GraphQLNonNull(ChangeUserInputType) },
       },
-      resolve: async (_, { id, dto }) => {
-        try {
-          const updatedUser = await prisma.user.update({
-            where: { id },
-            data: {
-              name: dto.name,
-              balance: dto.balance,
-            },
-          });
-          return updatedUser;
-        } catch (error) {
-          console.error('Error updating user:', error);
-          throw new Error('Failed to update user');
-        }
+      async resolve(_, { id, dto }, { prisma }) {
+        return prisma.user.update({
+          where: { id: id },
+          data: dto,
+        });
       },
     },
+
     deleteUser: {
-      type: GraphQLString,
-      args: { id: { type: new GraphQLNonNull(UUIDType) } },
-      resolve: async (_, { id }) => {
-        try {
-          await prisma.user.delete({ where: { id } });
-          return 'User deleted successfully';
-        } catch (error) {
-          console.error('Error deleting user:', error);
-          throw new Error('Failed to delete user');
-        }
+      type: new GraphQLNonNull(GraphQLString),
+      args: {
+        id: { type: new GraphQLNonNull(UUIDType) },
+      },
+      async resolve(_, { id }, { prisma }) {
+        await prisma.user.delete({
+          where: { id: id },
+        });
+
+        return 'User successfully deleted';
       },
     },
+
     deletePost: {
-      type: GraphQLString,
-      args: { id: { type: new GraphQLNonNull(UUIDType) } },
-      resolve: async (_, { id }) => {
-        try {
-          await prisma.post.delete({ where: { id } });
-          return 'Post deleted successfully';
-        } catch (error) {
-          console.error('Error deleting post:', error);
-          throw new Error('Failed to delete post');
-        }
+      type: new GraphQLNonNull(GraphQLString),
+      args: {
+        id: { type: new GraphQLNonNull(UUIDType) },
+      },
+      async resolve(_, { id }, { prisma }) {
+        await prisma.post.delete({
+          where: { id: id },
+        });
+
+        return 'Post successfully deleted';
       },
     },
+
     deleteProfile: {
-      type: GraphQLString,
-      args: { id: { type: new GraphQLNonNull(UUIDType) } },
-      resolve: async (_, { id }) => {
-        try {
-          await prisma.profile.delete({ where: { id } });
-          return 'Profile deleted successfully';
-        } catch (error) {
-          console.error('Error deleting profile:', error);
-          throw new Error('Failed to delete profile');
-        }
+      type: new GraphQLNonNull(GraphQLString),
+      args: {
+        id: { type: new GraphQLNonNull(UUIDType) },
+      },
+      async resolve(_, { id }, { prisma }) {
+        await prisma.profile.delete({
+          where: { id: id },
+        });
+
+        return 'Profile successfully deleted';
       },
     },
+
     subscribeTo: {
-      type: GraphQLString,
+      type: new GraphQLNonNull(GraphQLString),
       args: {
         userId: { type: new GraphQLNonNull(UUIDType) },
         authorId: { type: new GraphQLNonNull(UUIDType) },
       },
-      resolve: async (_, { userId, authorId }) => {
-        try {
-          await prisma.subscribersOnAuthors.create({
-            data: {
-              subscriber: { connect: { id: userId } },
-              author: { connect: { id: authorId } },
-            },
-          });
-          return 'Yuppee, Subscribed successfully';
-        } catch (error) {
-          console.error('Error subscribing:', error);
-          throw new Error('Failed to subscribe');
-        }
+      async resolve(_, { userId, authorId }, { prisma }) {
+        await prisma.subscribersOnAuthors.create({
+          data: {
+            subscriberId: userId,
+            authorId: authorId,
+          },
+        });
+
+        return 'Subscription created successfully';
       },
     },
+
     unsubscribeFrom: {
-      type: GraphQLString,
+      type: new GraphQLNonNull(GraphQLString),
       args: {
         userId: { type: new GraphQLNonNull(UUIDType) },
         authorId: { type: new GraphQLNonNull(UUIDType) },
       },
-      resolve: async (_, { userId, authorId }) => {
-        try {
-          await prisma.subscribersOnAuthors.delete({
-            where: {
-              subscriberId_authorId: {
-                subscriberId: userId,
-                authorId,
-              },
+      async resolve(_, { userId, authorId }, { prisma }) {
+        await prisma.subscribersOnAuthors.delete({
+          where: {
+            subscriberId_authorId: {
+              subscriberId: userId,
+              authorId: authorId,
             },
-          });
-          return 'Unsubscribed successfully';
-        } catch (error) {
-          console.error('Error unsubscribing:', error);
-          throw new Error('Failed to unsubscribe');
-        }
+          },
+        });
+        return 'Unsubscribed successfully';
       },
     },
   },
 });
 
-const schema = new GraphQLSchema({
-  query: RootQueryType,
-  mutation: Mutations,
+const RootQuery = new GraphQLObjectType({
+  name: 'RootQueryType',
+  fields: {
+    memberTypes: {
+      type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(MemberType))),
+      async resolve(_, args, { prisma, memberTypeLoader }) {
+        const memberTypes = await prisma.memberType.findMany();
+        memberTypes.forEach((memberType) =>
+          memberTypeLoader.prime(memberType.id, memberType),
+        );
+
+        return memberTypes;
+      },
+    },
+
+    memberType: {
+      type: MemberType,
+      args: {
+        id: { type: new GraphQLNonNull(MemberTypeIdEnum) },
+      },
+      async resolve(_, { id }, { memberTypeLoader }) {
+        return memberTypeLoader.load(id);
+      },
+    },
+
+    users: {
+      type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(UserType))),
+      async resolve(_, args, { prisma, userLoader }, resolveInfo) {
+        const parsedInfo = parse(resolveInfo);
+        const { fields } = simplify(parsedInfo as ResolveTree, new GraphQLList(UserType));
+
+        const users = await prisma.user.findMany({
+          include: {
+            subscribedToUser: 'subscribedToUser' in fields,
+            userSubscribedTo: 'userSubscribedTo' in fields,
+          },
+        });
+
+        users.forEach((user) => {
+          userLoader.prime(user.id, user);
+        });
+
+        return users;
+      },
+    },
+
+    user: {
+      type: UserType,
+      args: {
+        id: { type: new GraphQLNonNull(UUIDType) },
+      },
+      async resolve(_, { id }, { userLoader }) {
+        return userLoader.load(id);
+      },
+    },
+
+    posts: {
+      type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(PostType))),
+      async resolve(_, args, { prisma, postLoader }) {
+        const posts = await prisma.post.findMany();
+        posts.forEach((post) => {
+          postLoader.prime(post.id, post);
+        });
+
+        return posts;
+      },
+    },
+
+    post: {
+      type: PostType,
+      args: {
+        id: { type: new GraphQLNonNull(UUIDType) },
+      },
+      async resolve(_, { id }, { postLoader }) {
+        return postLoader.load(id);
+      },
+    },
+
+    profiles: {
+      type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(ProfileType))),
+      async resolve(_, args, { prisma, profileByIdLoader }) {
+        const profiles = await prisma.profile.findMany();
+        profiles.forEach((profile) => {
+          profileByIdLoader.prime(profile.id, profile);
+        });
+
+        return profiles;
+      },
+    },
+
+    profile: {
+      type: ProfileType,
+      args: {
+        id: { type: new GraphQLNonNull(UUIDType) },
+      },
+      async resolve(_, { id }, { profileByIdLoader }) {
+        return profileByIdLoader.load(id);
+      },
+    },
+  },
 });
 
-export default schema;
+export const schema = new GraphQLSchema({
+  query: RootQuery,
+  mutation: Mutations,
+});
