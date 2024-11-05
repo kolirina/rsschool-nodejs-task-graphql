@@ -29,16 +29,16 @@ await test('gql-mutations', async (t) => {
       body: { data, errors },
     } = await gqlQuery(app, {
       query: `mutation ($postDto: CreatePostInput!, $userDto: CreateUserInput!, $profileDto: CreateProfileInput!) {
-        createPost(dto: $postDto) {
-            id
-        }
-        createUser(dto: $userDto) {
-            id
-        }
-        createProfile(dto: $profileDto) {
-            id
-        }
-    }`,
+          createPost(dto: $postDto) {
+              id
+          }
+          createUser(dto: $userDto) {
+              id
+          }
+          createProfile(dto: $profileDto) {
+              id
+          }
+      }`,
       variables: {
         userDto: genCreateUserDto(),
         postDto: genCreatePostDto(user1.id),
